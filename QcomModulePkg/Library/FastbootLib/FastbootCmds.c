@@ -101,6 +101,7 @@ found at
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Library/UnlockMenu.h>
 #include <Library/BootLinux.h>
+#include <Library/SailLib.h>
 #include <Uefi.h>
 
 #include <Guid/EventGroup.h>
@@ -1814,6 +1815,19 @@ CmdFlash (IN CONST CHAR8 *arg, IN VOID *data, IN UINT32 sz)
     return;
   }
   AsciiStrToUnicodeStr (arg, PartitionName);
+
+  #ifdef ENABLE_SAIL_FLASHING
+  if (CheckSailPartition (arg)) {
+    Status = SailFlash (arg, mFlashDataBuffer, sz);
+    if (Status != EFI_SUCCESS) {
+      FastbootFail ("Sail Flashing failed");
+       return;
+    } else {
+      FastbootOkay ("Sail Flashing succeeded");
+      return;
+    }
+  }
+  #endif
 
   if ((GetAVBVersion () == AVB_LE) ||
       ((GetAVBVersion () != AVB_LE) &&
