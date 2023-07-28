@@ -2921,6 +2921,41 @@ CmdGetVar (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
   FastbootFail ("GetVar Variable Not found");
 }
 
+#ifdef ENABLE_SAIL_BOOT
+
+STATIC BOOLEAN EnableSailBoot = FALSE;
+
+STATIC VOID
+CmdOemSailBootEnable (IN CONST CHAR8 *Arg, IN VOID *Data, IN UINT32 Sz)
+{
+  CHAR8 *Ptr = NULL;
+  CONST CHAR8 *Delim = " ";
+
+  if (Arg) {
+    Ptr = AsciiStrStr (Arg, Delim);
+    if (Ptr) {
+      Ptr++;
+      if (!AsciiStrCmp (Ptr, "0")) {
+        EnableSailBoot = FALSE;
+      } else if (!AsciiStrCmp (Ptr, "1")) {
+        EnableSailBoot = TRUE;
+      }  else {
+        FastbootFail ("Invalid input entered");
+        return;
+      }
+    } else {
+      FastbootFail ("Enter fastboot oem sail-boot-enable 0/1");
+      return;
+    }
+  } else {
+    FastbootFail ("Enter fastboot oem sail-boot-enable 0/1");
+    return;
+  }
+  FastbootOkay ("");
+  return;
+}
+#endif
+
 #ifdef ENABLE_BOOT_CMD
 STATIC VOID
 CmdBoot (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
@@ -2933,6 +2968,19 @@ CmdBoot (CONST CHAR8 *Arg, VOID *Data, UINT32 Size)
   CHAR8 Resp[MAX_RSP_SIZE];
   BOOLEAN MdtpActive = FALSE;
   BootInfo Info = {0};
+
+  #ifdef ENABLE_SAIL_BOOT
+  if (EnableSailBoot) {
+    Status = SailBoot (Data, Size, TRUE);
+    if (Status != EFI_SUCCESS) {
+      FastbootFail ("SAIL Booting Failed.");
+      return;
+    } else {
+      FastbootOkay ("");
+      return;
+    }
+  }
+  #endif
 
   if (FixedPcdGetBool (EnableMdtpSupport)) {
     Status = IsMdtpActive (&MdtpActive);
@@ -3991,6 +4039,9 @@ FastbootCommandSetup (IN VOID *Base, IN UINT64 Size)
       {"oem device-info", CmdOemDevinfo},
 #if HIBERNATION_SUPPORT_NO_AES
       {"oem golden-snapshot", CmdGoldenSnapshot},
+#endif
+#ifdef ENABLE_SAIL_BOOT
+      {"oem sail-boot-enable", CmdOemSailBootEnable},
 #endif
       {"continue", CmdContinue},
       {"reboot", CmdReboot},

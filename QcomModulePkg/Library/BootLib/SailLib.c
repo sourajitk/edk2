@@ -10,12 +10,15 @@
 #include <Protocol/EFIMailbox.h>
 
 #define SAIL_BUFFER_ADDRESS 0x90E00000
+#define SAIL_IMAGE_DATA_OFFSET 0x800
+#define SAIL_IMAGE_SIZE_OFFSET 0xA40
 #define SAIL_PART_NAME_LEN 8
 
 EfiMailboxProtocol *MboxProt;
 
 UINT64 FlashStartTime, FlashEndTime;
 BOOLEAN FlashStatus = FALSE;
+BOOLEAN BootStatus = FALSE;
 UINT32 SailStatus = -1;
 
 STATIC CONST CHAR8 *SailPartitions[] = {
@@ -43,7 +46,6 @@ CheckSailPartition (CONST CHAR8 *Arg)
           ArgLength = ArgLength - 2;
   }
 
-  //For input shorter than 8 in length Ex. Sail
   ArgLength = (ArgLength > SAIL_PART_NAME_LEN) ? ArgLength : SAIL_PART_NAME_LEN;
 
   for (Part = 0; Part < SailPartCnt; Part++) {
@@ -313,4 +315,188 @@ SailFlash (IN CONST CHAR8 *Arg, IN VOID *Data, IN UINT32 Size)
         DEBUG ((EFI_D_ERROR, "Invalid Input:%a\n", Input));
    }
   return Status;
+}
+
+
+STATIC VOID
+SailBootCb (VOID)
+{
+  INT32 NumOfItems = 0;
+  EFI_STATUS Status = EFI_FAILURE;
+  INT32 Ret;
+
+  Status = MboxProt->MailboxGetValidItemNum (MAILBOX_OTA, &NumOfItems);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Error Mailbox_get_validitemnum\n"));
+    return;
+  }
+
+  if (NumOfItems) {
+    while (NumOfItems != 0) {
+      NumOfItems--;
+      sailUpdaterMsgHeaderType *CbBuf =
+                 AllocateZeroPool (sizeof (sailUpdaterMsgHeaderType));
+      if (!CbBuf) {
+        return;
+      }
+
+      Status = MboxProt->MailboxRead (MAILBOX_OTA, 1, (UINT8 *)CbBuf, &Ret);
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "Error Mailboxread ret:%d\n", Ret));
+      }
+      SailStatus = CbBuf->Status;
+      DEBUG ((EFI_D_ERROR, "SAIL Status:%d\n", SailStatus));
+    }
+    BootStatus = TRUE;
+  } else {
+    DEBUG ((EFI_D_ERROR, "No valid item found\n"));
+  }
+}
+
+EFI_STATUS
+SailBoot (IN VOID *Data, IN UINT32 Size, BOOLEAN Fastboot)
+{
+  EFI_STATUS Status = EFI_FAILURE;
+
+  UINT32        NumItems = 1;
+  INT32         Ret = 0;
+  UINT64        BufAddr = 0x0;
+  EFI_EVENT     TimeoutEvent;
+  UINTN         Timeout = 0;
+  UINTN         EventIndex =0;
+
+
+  if (!Size ||
+      !Data ) {
+    DEBUG ((EFI_D_ERROR, "Invalid Input\n"));
+    return Status;
+  }
+
+  if (Fastboot) {
+    Data  += SAIL_IMAGE_DATA_OFFSET;
+    Size  -= SAIL_IMAGE_SIZE_OFFSET;
+  }
+
+  Status = gBS->CreateEvent (EVT_TIMER, TPL_CALLBACK,
+                                       NULL, NULL, &TimeoutEvent);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Timeout Event Creation Failed:%r\n", Status));
+    return Status;
+  }
+
+  BootStatus = FALSE;
+
+
+  Status = GetSailBaseAddr (&BufAddr);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Failed to get the SAIL Buffer Address\n"));
+    return Status;
+  }
+
+  UINT32 *BufferAddr = (UINT32 *)BufAddr;
+
+  Status = gBS->LocateProtocol (&gEfiMailboxProtocolGuid,
+                                               NULL, (VOID **)&MboxProt);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Error locating Mailbox protocol\n"));
+    return Status;
+  }
+
+  Status = MboxProt->MailBoxInit ();
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Failed to Enable Mailbox\n"));
+    return Status;
+  }
+
+  Status = MboxProt->MailboxClientReg (MAILBOX_OTA, &SailBootCb);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Error in Mailbox client registration\n"));
+    return Status;
+  }
+
+  sailUpdaterMsgHeaderType __attribute__ ((aligned (32))) SourceBuf = {0};
+  SourceBuf.HeaderSize = sizeof (sailUpdaterMsgHeaderType);
+  SourceBuf.MsgId = SAIL_UPD_MSG_ID_BOOT_IMAGE;
+  SourceBuf.Direction = 0x0;
+  SourceBuf.Status = 0x0;
+
+  AsciiStrnCpyS ((CHAR8 *) SourceBuf.bootImg.imgName, SAIL_UPD_IMG_NAME_LEN,
+                       SAIL_UPD_IMG_NAME_SW1, sizeof (SAIL_UPD_IMG_NAME_SW1));
+
+  SourceBuf.bootImg.BootPartition = 0x0;
+  SourceBuf.bootImg.BootGptId = 0x0;
+
+  SourceBuf.bootImg.BufAddr = BufAddr;
+  SourceBuf.bootImg.BufLen = Size;
+
+  // Copy fastboot buffer to the Sail buffer. Fastboot host tool converts image
+  // to boot image format. Hence consider the offset for the actual sail image.
+
+  gBS->CopyMem ((VOID *)BufferAddr, Data, Size);
+
+  // Buffer CRC
+  Status = XCrc32Generate (1, (UINT8 *) BufferAddr, Size,
+                                       &SourceBuf.bootImg.BufCrc);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Buffer CRC calculation failed:%r\n", Status));
+    return Status;
+  }
+
+  // Header CRC
+  Status = XCrc32Generate (1, (UINT8 *)&SourceBuf,
+           sizeof (sailUpdaterMsgHeaderType), (UINT32 *)&SourceBuf.HeaderCrc);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Header CRC calculation failed:%r\n", Status));
+    return Status;
+  }
+
+  DEBUG ((EFI_D_VERBOSE, "\nMailbox write...\n"));
+  DEBUG ((EFI_D_VERBOSE, "Header Crc:%llx \n", SourceBuf.HeaderCrc));
+  DEBUG ((EFI_D_VERBOSE, "Header Size:%llx \n", SourceBuf.HeaderSize));
+  DEBUG ((EFI_D_VERBOSE, "MsgId:%d \n", SourceBuf.MsgId));
+  DEBUG ((EFI_D_VERBOSE, "Direction:%d \n", SourceBuf.Direction));
+  DEBUG ((EFI_D_VERBOSE, "Status:%d\n", SourceBuf.Status));
+  DEBUG ((EFI_D_VERBOSE, "ImgName: %a\n", SourceBuf.bootImg.imgName));
+  DEBUG ((EFI_D_VERBOSE,
+             "BootPartition: %d\n", SourceBuf.bootImg.BootPartition));
+  DEBUG ((EFI_D_VERBOSE, "BootGptId: %d\n", SourceBuf.bootImg.BootGptId));
+  DEBUG ((EFI_D_VERBOSE, "BufAddr: 0x%llx\n", SourceBuf.bootImg.BufAddr));
+  DEBUG ((EFI_D_VERBOSE, "BufLen: 0x%llx\n", SourceBuf.bootImg.BufLen));
+  DEBUG ((EFI_D_VERBOSE, "BufCrc: 0x%llx\n\n", SourceBuf.bootImg.BufCrc));
+
+
+  Status = MboxProt->MailboxWrite (MAILBOX_OTA,
+                                       NumItems, (UINT8 *)&SourceBuf, &Ret);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Error Mailbox Write(%d)\n", Ret));
+    return Status;
+  }
+
+  Status = gBS->SetTimer (TimeoutEvent, TimerPeriodic, 30 * 1000 * 1000);
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((EFI_D_ERROR, "Failed to set timer:%r\n", Status));
+    return Status;
+  }
+  while (TRUE) {
+   if (BootStatus == TRUE) {
+      break;
+   }
+
+   Status = gBS->WaitForEvent (1, &TimeoutEvent, &EventIndex);
+   if (Timeout++ == 6) {
+     SailStatus = EFI_FAILURE;
+     DEBUG ((EFI_D_ERROR, "SAIL Booting Timed Out.\n"));
+     break;
+    }
+  }
+
+  if (!SailStatus) {
+    Status = EFI_SUCCESS;
+  }
+  else {
+    Status = EFI_FAILURE;
+  }
+
+  return Status;
+
 }
