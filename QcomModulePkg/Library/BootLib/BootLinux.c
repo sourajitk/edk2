@@ -2083,6 +2083,18 @@ BOOLEAN IsMultiBoot (VOID)
 }
 #endif
 
+#ifdef ENABLE_POWER_KEY_MULTIPLEX
+BOOLEAN IsPowerKeyMultiplex (VOID)
+{
+  return TRUE;
+}
+#else
+BOOLEAN IsPowerKeyMultiplex (VOID)
+{
+  return FALSE;
+}
+#endif
+
 BOOLEAN IsBuildAsSystemRootImage (BootParamlist *BootParamlistPtr)
 {
    return BootParamlistPtr->RamdiskSize == 0;
