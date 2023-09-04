@@ -1442,6 +1442,12 @@ GetActiveSlot (Slot *ActiveSlot)
     return EFI_INVALID_PARAMETER;
   }
 
+  if ((IsSuffixEmpty (ActiveSlot) == TRUE) &&
+      (IsRecoveryInfo ())) {
+    Status = RI_GetActiveSlot (ActiveSlot);
+    return Status;
+  }
+
   for (UINTN SlotIndex = 0; SlotIndex < ARRAY_SIZE (Slots); SlotIndex++) {
     struct PartitionEntry *BootPartition =
         GetBootPartitionEntry (&Slots[SlotIndex]);
@@ -1471,12 +1477,6 @@ GetActiveSlot (Slot *ActiveSlot)
 
   if (AtomicABEnabled ()) {
     return GetAtomicABActiveSlot (ActiveSlot);
-  }
-
-  if ((IsSuffixEmpty (ActiveSlot) == TRUE) &&
-      (IsRecoveryInfo ())) {
-    Status = RI_GetActiveSlot (ActiveSlot);
-    return Status;
   }
 
   if (IsSuffixEmpty (ActiveSlot) == TRUE) {
