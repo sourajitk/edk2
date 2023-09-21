@@ -21,8 +21,10 @@ ifeq ($(BUILD_NATIVE_AARCH64),true)
 	export DISABLE_KERNEL_PROTOCOL := false
 	export DISABLE_MULTI_BOOT := false
 	export ENABLE_POWER_KEY_MULTIPLEX := false
-	export CLEAR_RESET_REASON := true
 endif
+
+# Common boot configuration for all targets
+export CLEAR_RESET_REASON := true
 
 ifndef $(BOOTLOADER_OUT)
 	BOOTLOADER_OUT := $(shell pwd)
