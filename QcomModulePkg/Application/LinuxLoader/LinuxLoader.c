@@ -79,11 +79,10 @@
 #include <Library/PartitionTableUpdate.h>
 #include <Library/ShutdownServices.h>
 #include <Library/StackCanary.h>
-#include "Library/ThreadStack.h"
+#include <Library/ThreadStack.h>
 #include <Library/HypervisorMvCalls.h>
 #include <Library/UpdateCmdLine.h>
 #include <Protocol/EFICardInfo.h>
-
 #include <Protocol/EFIClock.h>
 #include <Protocol/EFIPmicSdam.h>
 #include "RecoveryInfo.h"
@@ -103,28 +102,24 @@ UINT64 FlashlessBootImageAddr = 0;
 UINT64 NetworkBootImageAddr = 0;
 STATIC UINT32 BootDeviceType = EFI_MAX_FLASH_TYPE;
 
-// This function is used to Deactivate MDTP by entering recovery UI
-STATIC EFI_STATUS MdtpDisable (VOID)
-{
+// Deactivates MDTP by entering recovery UI
+STATIC EFI_STATUS MdtpDisable (VOID) {
   BOOLEAN MdtpActive = FALSE;
   EFI_STATUS Status = EFI_SUCCESS;
   QCOM_MDTP_PROTOCOL *MdtpProtocol;
 
   if (FixedPcdGetBool (EnableMdtpSupport)) {
     Status = IsMdtpActive (&MdtpActive);
-
-    if (EFI_ERROR (Status))
+    if (EFI_ERROR (Status)) {
       return Status;
+    }
 
     if (MdtpActive) {
-      Status = gBS->LocateProtocol (&gQcomMdtpProtocolGuid, NULL,
-                                    (VOID **)&MdtpProtocol);
+      Status = gBS->LocateProtocol (&gQcomMdtpProtocolGuid, NULL, (VOID **)&MdtpProtocol);
       if (EFI_ERROR (Status)) {
-        DEBUG ((EFI_D_ERROR, "Failed to locate MDTP protocol, Status=%r\n",
-                Status));
+        DEBUG ((EFI_D_ERROR, "Failed to locate MDTP protocol, Status=%r\n", Status));
         return Status;
       }
-      /* Perform Local Deactivation of MDTP */
       Status = MdtpProtocol->MdtpDeactivate (MdtpProtocol, FALSE);
     }
   }
@@ -132,181 +127,136 @@ STATIC EFI_STATUS MdtpDisable (VOID)
   return Status;
 }
 
-STATIC UINT8
-GetRebootReason (UINT32 *ResetReason)
-{
+// Retrieves the reboot reason
+STATIC UINT8 GetRebootReason (UINT32 *ResetReason) {
   EFI_RESETREASON_PROTOCOL *RstReasonIf;
   EFI_STATUS Status;
 
-  Status = gBS->LocateProtocol (&gEfiResetReasonProtocolGuid, NULL,
-                                (VOID **)&RstReasonIf);
+  Status = gBS->LocateProtocol (&gEfiResetReasonProtocolGuid, NULL, (VOID **)&RstReasonIf);
   if (Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "Error locating the reset reason protocol\n"));
     return Status;
   }
 
   RstReasonIf->GetResetReason (RstReasonIf, ResetReason, NULL, NULL);
-  if (RstReasonIf->Revision >= EFI_RESETREASON_PROTOCOL_REVISION &&
-      ClearResetReason ())
+  if (RstReasonIf->Revision >= EFI_RESETREASON_PROTOCOL_REVISION && ClearResetReason ()) {
     RstReasonIf->ClearResetReason (RstReasonIf);
+  }
   return Status;
 }
 
-STATIC VOID
-SetDefaultAudioFw ()
-{
+// Sets the default audio framework
+STATIC VOID SetDefaultAudioFw () {
   CHAR8 AudioFW[MAX_AUDIO_FW_LENGTH];
   STATIC CHAR8* Src;
   STATIC CHAR8* AUDIOFRAMEWORK;
   STATIC UINT32 Length;
   EFI_STATUS Status;
 
-  /* Update Audio framework if
-   * devmem Src is empty
-   * devmem Src is empty or not same as default.
-  */
   AUDIOFRAMEWORK = GetAudioFw ();
   if (AUDIOFRAMEWORK == NULL) {
-     DEBUG ((EFI_D_ERROR, "AUDIOFRAMEWORK is NULL\n"));
-     return;
+    DEBUG ((EFI_D_ERROR, "AUDIOFRAMEWORK is NULL\n"));
+    return;
   }
 
   if (AsciiStrLen (AUDIOFRAMEWORK) > 0) {
-  Status = ReadAudioFrameWork (&Src, &Length);
+    Status = ReadAudioFrameWork (&Src, &Length);
     if (Status == EFI_SUCCESS) {
       if ((AsciiStrLen (Src) == 0)) {
-          AsciiStrnCpyS (AudioFW, MAX_AUDIO_FW_LENGTH, AUDIOFRAMEWORK,
-          AsciiStrLen (AUDIOFRAMEWORK));
-          StoreAudioFrameWork (AudioFW, AsciiStrLen (AUDIOFRAMEWORK));
-        }
+        AsciiStrnCpyS (AudioFW, MAX_AUDIO_FW_LENGTH, AUDIOFRAMEWORK, AsciiStrLen (AUDIOFRAMEWORK));
+        StoreAudioFrameWork (AudioFW, AsciiStrLen (AUDIOFRAMEWORK));
       }
     }
+  }
 }
 
-STATIC VOID PrintCpuFrequency (VOID)
-{
+// Prints the CPU frequency
+STATIC VOID PrintCpuFrequency (VOID) {
   EFI_CLOCK_PROTOCOL  *ClockProtocol = NULL;
   EFI_KERNEL_PROTOCOL *KernIntf = NULL;
-  EFI_STATUS  status = EFI_SUCCESS;
+  EFI_STATUS  Status = EFI_SUCCESS;
   UINT32  numOfCore = 0;
   UINT32  pnPerfLevel;
   UINT32  pnFrequencyHz;
   UINT32  pnRequiredVoltage;
   UINT32  i = 0;
 
-  status = gBS->LocateProtocol (&gEfiKernelProtocolGuid,
-                  NULL, (VOID **)&KernIntf);
-  if (EFI_SUCCESS != status) {
-          return;
+  Status = gBS->LocateProtocol (&gEfiKernelProtocolGuid, NULL, (VOID **)&KernIntf);
+  if (EFI_SUCCESS != Status) {
+    return;
   }
 
   numOfCore = KernIntf->MpCpu->MpcoreGetAvailCpuCount ();
   if (!numOfCore) {
-     return;
+    return;
   }
 
-  status = gBS->LocateProtocol (&gEfiClockProtocolGuid,
-                  NULL, (VOID **)&ClockProtocol);
-  if (EFI_ERROR (status)) {
+  Status = gBS->LocateProtocol (&gEfiClockProtocolGuid, NULL, (VOID **)&ClockProtocol);
+  if (EFI_ERROR (Status)) {
     DEBUG ((EFI_D_ERROR, "Failed to locate CLOCK protocol\r\n"));
     return;
   }
 
   if (ClockProtocol) {
     for (i = 0; i < numOfCore; i++) {
-      status = ClockProtocol->GetCpuPerfLevel (ClockProtocol, i, &pnPerfLevel);
-      if (status != EFI_SUCCESS) {
-          continue;
+      Status = ClockProtocol->GetCpuPerfLevel (ClockProtocol, i, &pnPerfLevel);
+      if (Status != EFI_SUCCESS) {
+        continue;
       }
-      status = ClockProtocol->GetCpuPerfLevelFrequency (ClockProtocol, i,
-                     pnPerfLevel, &pnFrequencyHz, &pnRequiredVoltage);
+      Status = ClockProtocol->GetCpuPerfLevelFrequency (ClockProtocol, i, pnPerfLevel, &pnFrequencyHz, &pnRequiredVoltage);
     }
   }
 }
 
-BOOLEAN IsABRetryCountUpdateRequired (VOID)
-{
- BOOLEAN BatteryStatus;
+// Checks if A/B retry count update is required
+BOOLEAN IsABRetryCountUpdateRequired (VOID) {
+  BOOLEAN BatteryStatus;
 
- /* Check power off charging */
- TargetPauseForBatteryCharge (&BatteryStatus);
+  TargetPauseForBatteryCharge (&BatteryStatus);
 
- /* Do not decrement bootable retry count in below states:
- * fastboot, fastbootd, charger, recovery
- */
- if ((BatteryStatus &&
- IsChargingScreenEnable ()) ||
- BootIntoFastboot ||
- BootIntoRecovery) {
-  return FALSE;
- }
+  if ((BatteryStatus && IsChargingScreenEnable ()) || BootIntoFastboot || BootIntoRecovery) {
+    return FALSE;
+  }
   return TRUE;
 }
 
-/**
-  This function is used to check for boot type:
-    Flashless boot, Network boot, Fastboot.
- **/
-
-UINT32 GetBootDeviceType ()
-{
+// Determines the boot device type
+UINT32 GetBootDeviceType () {
   UINTN  DataSize = sizeof (BootDeviceType);
   EFI_STATUS Status = EFI_SUCCESS;
 
   if (BootDeviceType == EFI_MAX_FLASH_TYPE) {
-    Status = gRT->GetVariable (L"SharedImemBootCfgVal",
-               &gQcomTokenSpaceGuid, NULL, &DataSize, &BootDeviceType);
+    Status = gRT->GetVariable (L"SharedImemBootCfgVal", &gQcomTokenSpaceGuid, NULL, &DataSize, &BootDeviceType);
     if (Status != EFI_SUCCESS) {
-        DEBUG ((EFI_D_ERROR, "Failed to get boot device type, %r\n", Status));
+      DEBUG ((EFI_D_ERROR, "Failed to get boot device type, %r\n", Status));
     }
   }
 
   return BootDeviceType;
 }
 
-/**
-  Linux Loader Application EntryPoint
-
-  @param[in] ImageHandle    The firmware allocated handle for the EFI image.
-  @param[in] SystemTable    A pointer to the EFI System Table.
-
-  @retval EFI_SUCCESS       The entry point is executed successfully.
-  @retval other             Some error occurs when executing this entry point.
-
- **/
-
-EFI_STATUS EFIAPI  __attribute__ ( (no_sanitize ("safe-stack")))
-LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
-{
+// Linux Loader Application EntryPoint
+EFI_STATUS EFIAPI __attribute__ ((no_sanitize ("safe-stack"))) LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable) {
   EFI_STATUS Status;
   UINT32 Val = 0;
   UINT32 BootReason = NORMAL_MODE;
   UINT32 KeyPressed = SCAN_NULL;
   UINT32 PowerKeyPressTime = 0;
-  /* SilentMode Boot */
   CHAR8 SilentBootMode = NON_SILENT_MODE;
-  /* MultiSlot Boot */
   BOOLEAN MultiSlotBoot = FALSE;
-  /* Flashless Boot */
   BOOLEAN FlashlessBoot = FALSE;
-  /* Network Boot */
   BOOLEAN NetworkBoot = FALSE;
-  /* set ROT and BootSatte only once per boot*/
   BOOLEAN SetRotAndBootState = FALSE;
 
   DEBUG ((EFI_D_INFO, "Loader Build Info: %a %a\n", __DATE__, __TIME__));
-  DEBUG ((EFI_D_VERBOSE, "LinuxLoader Load Address to debug ABL: 0x%llx\n",
-         (UINTN)LinuxLoaderEntry & (~ (0xFFF))));
-  DEBUG ((EFI_D_VERBOSE, "LinuxLoaderEntry Address: 0x%llx\n",
-         (UINTN)LinuxLoaderEntry));
+  DEBUG ((EFI_D_VERBOSE, "LinuxLoader Load Address to debug ABL: 0x%llx\n", (UINTN)LinuxLoaderEntry & (~ (0xFFF))));
+  DEBUG ((EFI_D_VERBOSE, "LinuxLoaderEntry Address: 0x%llx\n", (UINTN)LinuxLoaderEntry));
 
   BootStatsSetInitTimeStamp ();
 
   Status = InitThreadUnsafeStack ();
-
   if (Status != EFI_SUCCESS) {
-    DEBUG ((EFI_D_ERROR, "Unable to Allocate memory for Unsafe Stack: %r\n",
-            Status));
+    DEBUG ((EFI_D_ERROR, "Unable to Allocate memory for Unsafe Stack: %r\n", Status));
     goto stack_guard_update_default;
   }
 
@@ -314,18 +264,15 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
 
   BootStatsSetTimeStamp (BS_BL_START);
 
-  /* check if it is NetworkBoot, FlashlessBoot or Fastboot */
   if (IsMultiBoot ()) {
     Val = GetBootDeviceType ();
     if (Val == EFI_EMMC_NETWORK_FLASH_TYPE) {
       NetworkBootImageAddr = BASE_ADDRESS;
       NetworkBoot = TRUE;
-      /* In Network boot avoid all access to secondary storage during boot */
       goto flashless_boot;
     } else if (Val == EFI_PCIE_FLASH_TYPE) {
       FlashlessBootImageAddr = BASE_ADDRESS;
       FlashlessBoot = TRUE;
-      /* In flashless boot avoid all access to secondary storage during boot */
       goto flashless_boot;
     } else if (Val == 0) {
       DEBUG ((EFI_D_ERROR, "Failed to get boot device type\n"));
@@ -333,7 +280,6 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
     }
   }
 
-  // Initialize verified boot & Read Device Info
   Status = DeviceInfoInit ();
   if (Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "Initialize the device info failed: %r\n", Status));
@@ -341,28 +287,23 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   }
 
   Status = EnumeratePartitions ();
-
   if (EFI_ERROR (Status)) {
-    DEBUG ((EFI_D_ERROR, "LinuxLoader: Could not enumerate partitions: %r\n",
-            Status));
+    DEBUG ((EFI_D_ERROR, "LinuxLoader: Could not enumerate partitions: %r\n", Status));
     goto stack_guard_update_default;
   }
 
   UpdatePartitionEntries ();
-  /*Check for multislot boot support*/
+
   MultiSlotBoot = PartitionHasMultiSlot ((CONST CHAR16 *)L"boot");
   if (MultiSlotBoot) {
     DEBUG ((EFI_D_VERBOSE, "Multi Slot boot is supported\n"));
     FindPtnActiveSlot ();
   }
 
-  /* Reading press and release time for power key from sdam register
-     for press time ranges between 3800msec to 4200msec, boot into fastboot */
   if (IsPowerKeyMultiplex ()) {
     Status = GetPowerKeyPressInfo (&PowerKeyPressTime);
     if (Status == EFI_SUCCESS) {
-      if ( PowerKeyPressTime > 3800 &&
-        PowerKeyPressTime < 4200) {
+      if (PowerKeyPressTime > 3800 && PowerKeyPressTime < 4200) {
         BootIntoFastboot = TRUE;
       }
     }
@@ -370,12 +311,9 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
 
   Status = GetKeyPress (&KeyPressed);
   if (Status == EFI_SUCCESS) {
-    if (KeyPressed == SCAN_DOWN)
-      BootIntoFastboot = TRUE;
-    if (KeyPressed == SCAN_UP)
-      BootIntoRecovery = TRUE;
-    if (KeyPressed == SCAN_ESC)
-      RebootDevice (EMERGENCY_DLOAD);
+    if (KeyPressed == SCAN_DOWN) BootIntoFastboot = TRUE;
+    if (KeyPressed == SCAN_UP) BootIntoRecovery = TRUE;
+    if (KeyPressed == SCAN_ESC) RebootDevice (EMERGENCY_DLOAD);
   } else if (Status == EFI_DEVICE_ERROR) {
     DEBUG ((EFI_D_ERROR, "Error reading key status: %r\n", Status));
     goto stack_guard_update_default;
@@ -384,7 +322,6 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   SetDefaultAudioFw ();
   PrintCpuFrequency ();
 
-  // check for reboot mode
   Status = GetRebootReason (&BootReason);
   if (Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "Failed to get Reboot reason: %r\n", Status));
@@ -392,68 +329,58 @@ LinuxLoaderEntry (IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE *SystemTable)
   }
 
   switch (BootReason) {
-  case FASTBOOT_MODE:
-    BootIntoFastboot = TRUE;
-    break;
-  case RECOVERY_MODE:
-    BootIntoRecovery = TRUE;
-    break;
-  case ALARM_BOOT:
-    BootReasonAlarm = TRUE;
-    break;
-  case DM_VERITY_ENFORCING:
-    // write to device info
-    Status = EnableEnforcingMode (TRUE);
-    if (Status != EFI_SUCCESS)
-      goto stack_guard_update_default;
-    break;
-  case DM_VERITY_LOGGING:
-    /* Disable MDTP if it's Enabled through Local Deactivation */
-    Status = MdtpDisable ();
-    if (EFI_ERROR (Status) && Status != EFI_NOT_FOUND) {
-      DEBUG ((EFI_D_ERROR, "MdtpDisable Returned error: %r\n", Status));
-      goto stack_guard_update_default;
-    }
-    // write to device info
-    Status = EnableEnforcingMode (FALSE);
-    if (Status != EFI_SUCCESS)
-      goto stack_guard_update_default;
-
-    break;
-  case DM_VERITY_KEYSCLEAR:
-    Status = ResetDeviceState ();
-    if (Status != EFI_SUCCESS) {
-      DEBUG ((EFI_D_ERROR, "VB Reset Device State error: %r\n", Status));
-      goto stack_guard_update_default;
-    }
-    break;
-  case SILENT_MODE:
-    SilentBootMode = SILENT_MODE;
-    break;
-  case NON_SILENT_MODE:
-    SilentBootMode = NON_SILENT_MODE;
-    break;
-  case FORCED_SILENT:
-    SilentBootMode = FORCED_SILENT;
-    break;
-  case FORCED_NON_SILENT:
-    SilentBootMode = FORCED_NON_SILENT;
-    break;
-  default:
-    if (BootReason != NORMAL_MODE) {
-      DEBUG ((EFI_D_ERROR,
-             "Boot reason: 0x%x not handled, defaulting to Normal Boot\n",
-             BootReason));
-    }
-    break;
+    case FASTBOOT_MODE:
+      BootIntoFastboot = TRUE;
+      break;
+    case RECOVERY_MODE:
+      BootIntoRecovery = TRUE;
+      break;
+    case ALARM_BOOT:
+      BootReasonAlarm = TRUE;
+      break;
+    case DM_VERITY_ENFORCING:
+      Status = EnableEnforcingMode (TRUE);
+      if (Status != EFI_SUCCESS) goto stack_guard_update_default;
+      break;
+    case DM_VERITY_LOGGING:
+      Status = MdtpDisable ();
+      if (EFI_ERROR (Status) && Status != EFI_NOT_FOUND) {
+        DEBUG ((EFI_D_ERROR, "MdtpDisable Returned error: %r\n", Status));
+        goto stack_guard_update_default;
+      }
+      Status = EnableEnforcingMode (FALSE);
+      if (Status != EFI_SUCCESS) goto stack_guard_update_default;
+      break;
+    case DM_VERITY_KEYSCLEAR:
+      Status = ResetDeviceState ();
+      if (Status != EFI_SUCCESS) {
+        DEBUG ((EFI_D_ERROR, "VB Reset Device State error: %r\n", Status));
+        goto stack_guard_update_default;
+      }
+      break;
+    case SILENT_MODE:
+      SilentBootMode = SILENT_MODE;
+      break;
+    case NON_SILENT_MODE:
+      SilentBootMode = NON_SILENT_MODE;
+      break;
+    case FORCED_SILENT:
+      SilentBootMode = FORCED_SILENT;
+      break;
+    case FORCED_NON_SILENT:
+      SilentBootMode = FORCED_NON_SILENT;
+      break;
+    default:
+      if (BootReason != NORMAL_MODE) {
+        DEBUG ((EFI_D_ERROR, "Boot reason: 0x%x not handled, defaulting to Normal Boot\n", BootReason));
+      }
+      break;
   }
 
   Status = RecoveryInit (&BootIntoRecovery);
-  if (Status != EFI_SUCCESS)
-    DEBUG ((EFI_D_VERBOSE, "RecoveryInit failed ignore: %r\n", Status));
+  if (Status != EFI_SUCCESS) DEBUG ((EFI_D_VERBOSE, "RecoveryInit failed ignore: %r\n", Status));
 
 flashless_boot:
-  /* Populate board data required for fastboot, dtb selection and cmd line */
   Status = BoardInit ();
   if (Status != EFI_SUCCESS) {
     DEBUG ((EFI_D_ERROR, "Error finding board information: %r\n", Status));
@@ -461,17 +388,16 @@ flashless_boot:
   }
 
   DEBUG ((EFI_D_INFO, "KeyPress:%u, BootReason:%u\n", KeyPressed, BootReason));
-  DEBUG ((EFI_D_INFO, "Fastboot=%d, Recovery:%d\n",
-                                          BootIntoFastboot, BootIntoRecovery));
+  DEBUG ((EFI_D_INFO, "Fastboot=%d, Recovery:%d\n", BootIntoFastboot, BootIntoRecovery));
   DEBUG ((EFI_D_INFO, "SilentBoot Mode:%u\n", SilentBootMode));
+
   if (!GetVmData ()) {
     DEBUG ((EFI_D_ERROR, "VM Hyp calls not present\n"));
   }
 
   if (BootIntoFastboot) {
     goto fastboot;
-  }
-  else {
+  } else {
     BootInfo Info = {0};
     Info.MultiSlotBoot = MultiSlotBoot;
     Info.BootIntoRecovery = BootIntoRecovery;
@@ -479,17 +405,17 @@ flashless_boot:
     Info.FlashlessBoot = FlashlessBoot;
     Info.NetworkBoot = NetworkBoot;
     Info.SilentBootMode = SilentBootMode;
-  #if HIBERNATION_SUPPORT_NO_AES
+
+    #if HIBERNATION_SUPPORT_NO_AES
     BootIntoHibernationImage (&Info, &SetRotAndBootState);
-  #endif
+    #endif
+
     Status = LoadImageAndAuth (&Info, FALSE, SetRotAndBootState);
     if (Status != EFI_SUCCESS) {
       DEBUG ((EFI_D_ERROR, "LoadImageAndAuth failed: %r\n", Status));
       if (IsRecoveryInfo ()) {
-        Slot CurrentSlot ;
-        CurrentSlot = GetCurrentSlotSuffix ();
+        Slot CurrentSlot = GetCurrentSlotSuffix ();
         RI_HandleFailedSlot (CurrentSlot);
-        /*No return*/
       }
       goto fastboot;
     }
@@ -498,10 +424,8 @@ flashless_boot:
   }
 
 fastboot:
-  if (FlashlessBoot ||
-      NetworkBoot) {
-    DEBUG ((EFI_D_ERROR, "No fastboot support for flashless chipsets,"
-                               " Infinte loop\n"));
+  if (FlashlessBoot || NetworkBoot) {
+    DEBUG ((EFI_D_ERROR, "No fastboot support for flashless chipsets, Infinite loop\n"));
     while (1);
   }
   DEBUG ((EFI_D_INFO, "Launching fastboot\n"));
@@ -512,10 +436,7 @@ fastboot:
   }
 
 stack_guard_update_default:
-  /*Update stack check guard with defualt value then return*/
   __stack_chk_guard = DEFAULT_STACK_CHK_GUARD;
-
   DeInitThreadUnsafeStack ();
-
   return Status;
 }
